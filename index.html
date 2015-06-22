@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Agumented reality</title>
+    <style type="text/css">
+    .img-pos {
+        position: relative;
+    }
+    
+    .img-pos div {
+        position: absolute;
+        top: 100px;
+        left: 480px
+    }
+    
+    #webcam {
+        display: none;
+    }
+ 
+
+    </style>
+</head>
+
+<body>
+    <div class="img-pos">
+        <div>
+            <img src="BMS-logo.png" id="note">
+        </div>
+    </div>
+    <video id="webcam" autoplay width="640" height="480"></video>
+    <canvas id="canvas-source" width="640" height="480"></canvas>
+    <canvas id="canvas-blended" width="640" height="480"></canvas>
+    <script type="text/javascript">
+    function hasGetUserMedia() {
+        return !!(navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia)
+    }
+    var video = document.querySelector("#webcam");
+    console.log(document.querySelector("#note"));
+    if (navigator.getUserMedia) {
+        navigator.getUserMedia({
+            video: true
+        }, function(stream) {
+            video.src = stream;
+        }, webcamError);
+    } else if (navigator.webkitGetUserMedia) {
+        console.log(navigator.webkitGetUserMedia);
+        navigator.webkitGetUserMedia({
+            video: true
+        }, function(stream) {
+            video.src = window.URL.createObjectURL(stream);
+            update(stream);
+        }, webcamError);
+    } else if (navigator.mozGetUserMedia) {
+        console.log(navigator.mozGetUserMedia);
+        navigator.mozGetUserMedia({
+            video: true
+        }, function(stream) {
+            video.src = window.URL.createObjectURL(stream);
+            update(stream);
+        }, webcamError);
+    }
+
+    function webcamError(e) {
+        console.log("Webcam error" + e);
+    }
+
+    //Variables
+    var timeOut, lastImageData;
+    var canvasSource = document.querySelector("#canvas-source");
+    var canvasBlended = document.querySelector("#canvas-blended");
+    var contextSource = canvasSource.getContext('2d');
+    var contextBlended = canvasBlended.getContext('2d');
+    var bufferLoader;
+    var notesPos = [0, 82, 159, 238, 313, 390, 468, 544];
+    var count = 0;
+    var notes = [{
+        area: {
+            x: 400,
+            y: 100,
+            width: 160,
+            height: 50
+        }
+    }];
+    var tabOpened = false;
+    var openedTab = null;
+
+    //Invert 'x' of canvas image
+    contextSource.translate(canvasSource.width, 0);
+    contextSource.scale(-1, 1);
+
+    function update(stream) {
+        drawVideo();
+        blend();
+        checkAreas(stream);
+
+        timeOut = setTimeout(update, 1000 / 60);
+    }
+
+    function openTab(stream) {
+        openedTab = window.open("http://in.bookmyshow.com/mumbai");
+        console.log(openedTab);
+        tabOpened = true;
+        stream.stop();
+        video.src="";
+        clearTimeout(timeOut);
+    }
+    function closeTab(){
+        if(tabOpened){
+            openedTab.close();
+            tabOpened = false;
+            update();
+        }
+    }
+
+    function drawVideo() {
+            contextSource.drawImage(video, 0, 0, video.width, video.height);
+        }
+        //Calculate abs value
+    function fastAbs(value) {
+            return (value ^ (value >> 31)) - (value >> 31);
+        }
+        //Calculate blend mode
+    function difference(target, data1, data2) {
+            if (data1.length != data2.length) return null;
+            var i = 0;
+            while (i < (data1.length * 0.25)) {
+                target[4 * i] = data1[4 * i] === 0 ? 0 : fastAbs(data1[4 * i] - data2[4 * i]);
+                target[4 * i + 1] = data1[4 * i + 1] === 0 ? 0 : fastAbs(data1[4 * i + 1] - data2[4 * i + 1]);
+                target[4 * i + 2] = data1[4 * i + 2] === 0 ? 0 : fastAbs(data1[4 * i + 1] - data2[4 * i + 1]);
+                target[4 * i + 3] = 0xFF;
+                ++i;
+            }
+        }
+        //threshold function sets a pixel to either black or white based on the threshold
+    function threshold(value) {
+        return (value > 0x15) ? 0xFF : 0;
+    }
+
+    function differenceAccuracy(target, data1, data2) {
+        if (data1.length != data2.length) return null;
+        var i = 0;
+        while (i < (data1.length * 0.25)) {
+            var average1 = (data1[4 * i] + data1[4 * i + 1] + data1[4 * i + 2]) / 3;
+            var average2 = (data2[4 * i] + data2[4 * i + 1] + data2[4 * i + 2]) / 3;
+            var diff = threshold(fastAbs(average1 - average2));
+            target[4 * i] = diff;
+            target[4 * i + 1] = diff;
+            target[4 * i + 2] = diff;
+            target[4 * i + 3] = 0xFF;
+            ++i;
+        }
+    }
+
+    function blend() {
+        var width = canvasSource.width;
+        var height = canvasSource.height;
+
+        var sourceData = contextSource.getImageData(0, 0, width, height);
+
+        if (!lastImageData) lastImageData = contextSource.getImageData(0, 0, width, height);
+
+        var blendedData = contextSource.createImageData(width, height);
+
+        differenceAccuracy(blendedData.data, sourceData.data, lastImageData.data);
+        contextBlended.putImageData(blendedData, 0, 0);
+        lastImageData = sourceData;
+    }
+
+    function checkAreas(stream) {
+        for (var r = 0; r < 1; r++) {
+            var blendedData = contextBlended.getImageData(
+                notes[r].area.x,
+                notes[r].area.y,
+                notes[r].area.width,
+                notes[r].area.height
+            );
+            var i = 0;
+            var average = 0;
+
+            while (i < (blendedData.data.length / 4)) {
+                average += (blendedData.data[i * 4] + blendedData.data[i * 4 + 1] + blendedData.data[i * 4 + 2]) / 3;
+                ++i;
+            }
+
+            average = Math.round(average / (blendedData.data.length / 4));
+            count++;
+            console.log(count);
+            if (average > 80 && average <200) {
+                console.log(average);
+                console.log("touch");
+                tabOpened ? closeTab():openTab(); 
+                if(tabOpened){
+                    closeTab();
+                }else{
+                    openTab(stream);
+                }
+            }
+
+        }
+    }
+    </script>
+</body>
+
+</html>
